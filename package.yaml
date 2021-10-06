@@ -29,6 +29,7 @@ library:
     - cryptonite
     - directory
     - path
+    - filepath
     - strong-path
     - utf8-string
 
@@ -46,6 +47,7 @@ executables:
       - cryptonite
       - directory
       - path
+      - filepath
       - strong-path
       - utf8-string
 

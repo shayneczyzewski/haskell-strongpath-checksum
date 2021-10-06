@@ -1,11 +1,11 @@
 module Main where
 
-import Lib (printFileChecksums)
+import Lib (listDirContentsAndCalcChecksums)
 import System.Environment (getArgs)
 
 main :: IO ()
 main = do
   args <- getArgs
   case args of
-    [absDirFP] -> printFileChecksums absDirFP
+    [absDirFP] -> listDirContentsAndCalcChecksums absDirFP >>= mapM_ print
     _ -> error "Exactly one argument required: Absolute path to directory"

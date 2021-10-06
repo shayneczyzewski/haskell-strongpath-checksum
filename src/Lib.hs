@@ -1,79 +1,53 @@
 module Lib
-  ( printFileChecksums,
+  ( listDirContentsAndCalcChecksums,
   )
 where
 
-import Control.Monad (filterM, liftM2)
-import Crypto.Hash (Digest, SHA256 (..), hashWith)
+import Control.Monad (filterM)
+import Crypto.Hash (SHA256 (..), hashWith)
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy.UTF8 as BLU
-import qualified Path as P
+import StrongPath (Abs, Dir', File', Path', Rel')
 import qualified StrongPath as SP
 import System.Directory (doesDirectoryExist, doesFileExist, listDirectory)
-import System.IO ()
-
-type AbsPathToFile = SP.Path' SP.Abs (SP.File ())
-
-type AbsPathToDir = SP.Path' SP.Abs (SP.Dir ())
+import qualified System.FilePath.Posix as FP
 
 type Checksum = String
 
-printFileChecksums :: FilePath -> IO ()
-printFileChecksums absDirFP =
-  do
-    absDirSP <- SP.parseAbsDir absDirFP
-    filesWithChecksums <- walkDirs [] [absDirSP] (return [])
-    mapM_ print filesWithChecksums
+listDirContentsAndCalcChecksums :: FilePath -> IO [(Path' Abs File', Checksum)]
+listDirContentsAndCalcChecksums absDirFP = SP.parseAbsDir absDirFP >>= listDirContentsAndCalcChecksums'
 
--- Gets all checksums for all descendant files (including in subdirectories)
-walkDirs :: [AbsPathToFile] -> [AbsPathToDir] -> IO [(AbsPathToFile, Checksum)] -> IO [(AbsPathToFile, Checksum)]
-walkDirs (fp : fps) dirs acc =
-  do
-    walkDirs fps dirs (liftM2 (:) (getFileChecksum fp) acc)
-walkDirs [] (dp : dps) acc =
-  do
-    files <- listFilesInDirectory dp
-    dirs <- listDirsInDirectory dp
-    walkDirs files (dirs ++ dps) acc
-walkDirs [] [] acc = acc
+listDirContentsAndCalcChecksums' :: Path' Abs Dir' -> IO [(Path' Abs File', Checksum)]
+listDirContentsAndCalcChecksums' dir = do
+  files <- listDirContents dir
+  checksums <- mapM getFileChecksum files
+  return $ zip files checksums
 
-getFileChecksum :: AbsPathToFile -> IO (AbsPathToFile, Checksum)
-getFileChecksum absFileSP =
-  do
-    contents <- B.readFile $ SP.fromAbsFile absFileSP
-    let checksum = hashWith SHA256 contents
-    return (absFileSP, show checksum)
+listDirContents :: Path' Abs Dir' -> IO [Path' Abs File']
+listDirContents dir = do
+  files <- listFilesInDirectory dir
+  subdirs <- listDirsInDirectory dir
+  filesFromSubdirs <- mapM listDirContents subdirs
+  return $ files ++ concat filesFromSubdirs
 
--- TODO: Probably some nicer way to keep the shape of these two functions but
--- extract the boilerplate and parameterize functions used based on dir or file.
--- Also, not ideal to go from StrongPath, to FilePath, to StrongPath,
--- to FilePath, and back to StrongPath, but didn't see a clean interop method between them
--- to use listDirectory and doesXExist.
-listFilesInDirectory :: AbsPathToDir -> IO [AbsPathToFile]
+getFileChecksum :: Path' Abs File' -> IO Checksum
+getFileChecksum file = do
+  contents <- B.readFile $ SP.fromAbsFile file
+  return $ show $ hashWith SHA256 contents
+
+listFilesInDirectory :: Path' Abs Dir' -> IO [Path' Abs File']
 listFilesInDirectory absDirSP =
   do
-    relFileFPs <- listDirectory $ SP.fromAbsDir absDirSP
-    absFileSPs <- mapM (relToAbsFilePath absDirSP) relFileFPs
-    absFileFPs <- filterM doesFileExist (map SP.fromAbsFile absFileSPs)
+    let absDirFP = SP.fromAbsDir absDirSP
+    relFPs <- listDirectory absDirFP
+    let absFPs = map (absDirFP FP.</>) relFPs
+    absFileFPs <- filterM doesFileExist absFPs
     mapM SP.parseAbsFile absFileFPs
 
-listDirsInDirectory :: AbsPathToDir -> IO [AbsPathToDir]
+listDirsInDirectory :: Path' Abs Dir' -> IO [Path' Abs Dir']
 listDirsInDirectory absDirSP =
   do
-    relDirFPs <- listDirectory $ SP.fromAbsDir absDirSP
-    absDirSPs <- mapM (relToAbsDirPath absDirSP) relDirFPs
-    absDirFPs <- filterM doesDirectoryExist (map SP.fromAbsDir absDirSPs)
+    let absDirFP = SP.fromAbsDir absDirSP
+    relFPs <- listDirectory absDirFP
+    let absFPs = map (absDirFP FP.</>) relFPs
+    absDirFPs <- filterM doesDirectoryExist absFPs
     mapM SP.parseAbsDir absDirFPs
-
--- Helpers to combine StrongPaths and FilePaths
-relToAbsFilePath :: AbsPathToDir -> FilePath -> IO AbsPathToFile
-relToAbsFilePath absDirSP relFileFP =
-  do
-    relFileSP <- SP.parseRelFile relFileFP
-    return (absDirSP SP.</> relFileSP)
-
-relToAbsDirPath :: AbsPathToDir -> FilePath -> IO AbsPathToDir
-relToAbsDirPath absDirSP relDirFP =
-  do
-    relDirSP <- SP.parseRelDir relDirFP
-    return (absDirSP SP.</> relDirSP)
